@@ -25,7 +25,7 @@ public class CpvpClient implements ClientModInitializer {
         toggleKey = KeyBindingHelper.registerKeyBinding(new KeyBinding(
                 "key.cpvptier2.autototem",
                 InputUtil.Type.KEYSYM,
-                GLFW.GLFW_KEY_H,
+                GLFW.GLFW_KEY_K,
                 CPVP_CATEGORY
         ));
 
