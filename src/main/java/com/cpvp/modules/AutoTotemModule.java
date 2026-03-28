@@ -77,7 +77,7 @@ public class AutoTotemModule {
     private void onPop(MinecraftClient client, ClientPlayerEntity player) {
         // Step 1 always: switch to slot 9 immediately (no inv needed)
         // This keeps player alive if double tapped before inv opens
-        switchToSlot9(player);
+        switchToSlot9(client, player);
 
         // Now start the sequence to open inv and refill
         autoClose = true;
@@ -157,8 +157,10 @@ public class AutoTotemModule {
     // ── Actions ───────────────────────────────────────────────────────────────
 
     /** Instantly switch hotbar selection to slot 9 — no inventory needed. */
-    private void switchToSlot9(ClientPlayerEntity player) {
-        player.getInventory().selectedSlot = TOTEM_HOTBAR_INDEX;
+    private void switchToSlot9(MinecraftClient client, ClientPlayerEntity player) {
+        client.execute(() -> {
+            player.getInventory().select(TOTEM_HOTBAR_INDEX);
+        });
     }
 
     private void moveToOffhand(MinecraftClient client, ClientPlayerEntity player, int invSlot) {
