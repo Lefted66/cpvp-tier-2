@@ -11,6 +11,7 @@
     "client": ["com.cpvp.CpvpClient"]
   },
   "mixins": ["cpvptier2.mixins.json"],
+  "accessWidener": "cpvptier2.accesswidener",
   "depends": {
     "fabricloader": ">=0.18.4",
     "fabric-api": "*",
