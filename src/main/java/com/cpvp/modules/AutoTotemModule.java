@@ -81,18 +81,9 @@ public class AutoTotemModule {
     }
 
     private void onPop(MinecraftClient client, ClientPlayerEntity player) {
-        // Double hand: switch to slot 9 immediately via hotbar key press
-        // Works without inventory open
-        client.execute(() -> {
-            if (client.gameRenderer != null && client.player != null) {
-                // Send hotbar slot change packet directly
-                client.player.networkHandler.sendPacket(
-                    new net.minecraft.network.packet.c2s.play.UpdateSelectedSlotC2SPacket(
-                        TOTEM_HOTBAR_INDEX
-                    )
-                );
-            }
-        });
+        // Double hand: set selectedSlot directly on client side only
+        // No packet sent — no anticheat flags
+        player.getInventory().selectedSlot = TOTEM_HOTBAR_INDEX;
 
         autoClose = true;
         startAt(0);
