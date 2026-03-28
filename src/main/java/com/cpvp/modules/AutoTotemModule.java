@@ -15,17 +15,14 @@ public class AutoTotemModule {
     private static final long TICK_MS            = 50;
     private static final long JITTER_MS          = 10;
 
-    // ── State ─────────────────────────────────────────────────────────────────
     private boolean enabled             = false;
     private boolean running             = false;
-    private boolean autoClose           = false; // only close if WE opened inv
+    private boolean autoClose           = false;
     private boolean prevInvOpen         = false;
     private boolean prevOffhandWasTotem = false;
     private boolean prevSlot9WasTotem   = false;
-
-    // Scenario flags set at pop time
-    private boolean offhandPopped = false;
-    private boolean slot9Popped   = false;
+    private boolean offhandPopped       = false;
+    private boolean slot9Popped         = false;
 
     private int  step          = 0;
     private long stepStartTime = 0;
@@ -42,11 +39,11 @@ public class AutoTotemModule {
     public void onTick(MinecraftClient client) {
         if (!enabled || client.player == null) return;
 
-        ClientPlayerEntity player  = client.player;
-        boolean invOpen            = client.currentScreen instanceof InventoryScreen;
-        boolean offhandHasTotem    = player.getOffHandStack().isOf(Items.TOTEM_OF_UNDYING);
-        boolean slot9HasTotem      = player.getInventory().getStack(TOTEM_HOTBAR_INDEX)
-                                           .isOf(Items.TOTEM_OF_UNDYING);
+        ClientPlayerEntity player = client.player;
+        boolean invOpen           = client.currentScreen instanceof InventoryScreen;
+        boolean offhandHasTotem   = player.getOffHandStack().isOf(Items.TOTEM_OF_UNDYING);
+        boolean slot9HasTotem     = player.getInventory().getStack(TOTEM_HOTBAR_INDEX)
+                                          .isOf(Items.TOTEM_OF_UNDYING);
 
         // ── Pop detection ─────────────────────────────────────────────────
         boolean offhandJustPopped = prevOffhandWasTotem && !offhandHasTotem
@@ -65,8 +62,9 @@ public class AutoTotemModule {
 
         // ── Manual inventory open ─────────────────────────────────────────
         if (!prevInvOpen && invOpen && !running) {
-            // Player opened inv manually — fill whatever is missing, no auto-close
-            autoClose = false;
+            autoClose     = false;
+            offhandPopped = false;
+            slot9Popped   = false;
             startAt(1);
         }
         prevInvOpen = invOpen;
@@ -75,13 +73,13 @@ public class AutoTotemModule {
     }
 
     private void onPop(MinecraftClient client, ClientPlayerEntity player) {
-        // Step 1 always: switch to slot 9 immediately (no inv needed)
-        // This keeps player alive if double tapped before inv opens
+        // Double hand: instantly switch to slot 9 before inventory opens
+        // Keeps player alive if dtapped before inv opens
         switchToSlot9(client, player);
 
-        // Now start the sequence to open inv and refill
+        // Auto open, refill, auto close
         autoClose = true;
-        startAt(0); // step 0 = open inventory
+        startAt(0);
     }
 
     private void startAt(int startStep) {
@@ -98,7 +96,6 @@ public class AutoTotemModule {
         ClientPlayerEntity player = client.player;
         if (player == null) { reset(); return; }
 
-        // Re-check current state each step
         boolean offhandFull = player.getOffHandStack().isOf(Items.TOTEM_OF_UNDYING);
         boolean slot9Full   = player.getInventory().getStack(TOTEM_HOTBAR_INDEX)
                                     .isOf(Items.TOTEM_OF_UNDYING);
@@ -115,7 +112,7 @@ public class AutoTotemModule {
             case 1 -> {
                 // Double pop: fill slot 9 first
                 // Slot 9 only pop: fill slot 9
-                // Offhand only pop / manual: skip slot 9 here
+                // Offhand only pop / manual: skip
                 if (slot9Popped && !slot9Full) {
                     int slot = findTotem(player.getInventory(), TOTEM_HOTBAR_INDEX);
                     if (slot != -1) swapToHotbar(client, player, slot, TOTEM_HOTBAR_INDEX);
@@ -124,13 +121,8 @@ public class AutoTotemModule {
             }
 
             case 2 -> {
-                // Fill offhand if needed
-                // Skip if this was a slot9-only pop and offhand is already fine
-                if (!offhandFull && offhandPopped) {
-                    int slot = findTotem(player.getInventory(), -1);
-                    if (slot != -1) moveToOffhand(client, player, slot);
-                } else if (!offhandFull && !slot9Popped) {
-                    // Manual open — fill offhand if empty
+                // Fill offhand if popped or if manual open and empty
+                if (!offhandFull && (offhandPopped || (!offhandPopped && !slot9Popped))) {
                     int slot = findTotem(player.getInventory(), -1);
                     if (slot != -1) moveToOffhand(client, player, slot);
                 }
@@ -138,7 +130,7 @@ public class AutoTotemModule {
             }
 
             case 3 -> {
-                // Fill slot 9 if still needed (offhand-only pop or manual)
+                // Fill slot 9 if offhand-only pop or manual open and slot 9 empty
                 if (!slot9Full && !slot9Popped) {
                     int slot = findTotem(player.getInventory(), TOTEM_HOTBAR_INDEX);
                     if (slot != -1 && slot != TOTEM_HOTBAR_INDEX)
@@ -156,7 +148,6 @@ public class AutoTotemModule {
 
     // ── Actions ───────────────────────────────────────────────────────────────
 
-    /** Instantly switch hotbar selection to slot 9 — no inventory needed. */
     private void switchToSlot9(MinecraftClient client, ClientPlayerEntity player) {
         client.execute(() -> {
             client.interactionManager.clickSlot(
@@ -199,10 +190,6 @@ public class AutoTotemModule {
 
     private static int toScreenSlot(int invSlot) {
         return invSlot < 9 ? invSlot + 36 : invSlot;
-    }
-
-    private boolean isInventoryOpen(MinecraftClient client) {
-        return client.currentScreen instanceof InventoryScreen;
     }
 
     private void closeInventory(MinecraftClient client) {
