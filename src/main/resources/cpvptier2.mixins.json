@@ -2,9 +2,7 @@
   "required": true,
   "package": "com.cpvp.mixin",
   "compatibilityLevel": "JAVA_21",
-  "client": [
-    "ClientPlayerEntityMixin"
-  ],
+  "client": [],
   "injectors": {
     "defaultRequire": 1
   }
