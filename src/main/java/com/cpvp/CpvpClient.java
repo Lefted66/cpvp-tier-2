@@ -39,7 +39,8 @@ public class CpvpClient implements ClientModInitializer {
                 if (client.player != null) {
                     client.player.sendMessage(
                         Text.literal("[cPvP] AutoTotem: "
-                            + (AUTO_TOTEM.isEnabled() ? "§aON" : "§cOFF"))
+                            + (AUTO_TOTEM.isEnabled() ? "§aON" : "§cOFF")),
+                        false
                     );
                 }
             }
