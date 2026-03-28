@@ -6,6 +6,7 @@ import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.keybinding.v1.KeyBindingHelper;
 import net.minecraft.client.option.KeyBinding;
 import net.minecraft.client.util.InputUtil;
+import net.minecraft.util.Identifier;
 import org.lwjgl.glfw.GLFW;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -16,13 +17,16 @@ public class CpvpClient implements ClientModInitializer {
     public static final AutoTotemModule AUTO_TOTEM = new AutoTotemModule();
     public static KeyBinding toggleKey;
 
+    private static final KeyBinding.Category CPVP_CATEGORY =
+            KeyBinding.Category.create(Identifier.of("cpvptier2", "main"));
+
     @Override
     public void onInitializeClient() {
         toggleKey = KeyBindingHelper.registerKeyBinding(new KeyBinding(
                 "key.cpvptier2.autototem",
                 InputUtil.Type.KEYSYM,
                 GLFW.GLFW_KEY_H,
-                KeyBinding.MISC_CATEGORY
+                CPVP_CATEGORY
         ));
 
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
