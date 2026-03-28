@@ -24,6 +24,10 @@ public class AutoTotemModule {
     private boolean offhandPopped       = false;
     private boolean slot9Popped         = false;
 
+    // Cooldown to prevent false triggers
+    private long lastPopTime = 0;
+    private static final long POP_COOLDOWN_MS = 1000;
+
     private int  step          = 0;
     private long stepStartTime = 0;
 
@@ -44,17 +48,21 @@ public class AutoTotemModule {
         boolean offhandHasTotem   = player.getOffHandStack().isOf(Items.TOTEM_OF_UNDYING);
         boolean slot9HasTotem     = player.getInventory().getStack(TOTEM_HOTBAR_INDEX)
                                           .isOf(Items.TOTEM_OF_UNDYING);
+        long now = System.currentTimeMillis();
 
         // ── Pop detection ─────────────────────────────────────────────────
-        boolean offhandJustPopped = prevOffhandWasTotem && !offhandHasTotem
-                                    && player.getHealth() <= 1.0f;
-        boolean slot9JustPopped   = prevSlot9WasTotem && !slot9HasTotem
-                                    && player.getHealth() <= 1.0f;
+        // Detect purely from totem disappearing — no health check needed
+        // Cooldown prevents double-firing
+        if (!running && (now - lastPopTime) > POP_COOLDOWN_MS) {
+            boolean offhandJustPopped = prevOffhandWasTotem && !offhandHasTotem;
+            boolean slot9JustPopped   = prevSlot9WasTotem   && !slot9HasTotem;
 
-        if ((offhandJustPopped || slot9JustPopped) && !running) {
-            offhandPopped = offhandJustPopped;
-            slot9Popped   = slot9JustPopped;
-            onPop(client, player);
+            if (offhandJustPopped || slot9JustPopped) {
+                lastPopTime   = now;
+                offhandPopped = offhandJustPopped;
+                slot9Popped   = slot9JustPopped;
+                onPop(client, player);
+            }
         }
 
         prevOffhandWasTotem = offhandHasTotem;
@@ -73,11 +81,19 @@ public class AutoTotemModule {
     }
 
     private void onPop(MinecraftClient client, ClientPlayerEntity player) {
-        // Double hand: instantly switch to slot 9 before inventory opens
-        // Keeps player alive if dtapped before inv opens
-        switchToSlot9(client, player);
+        // Double hand: switch to slot 9 immediately via hotbar key press
+        // Works without inventory open
+        client.execute(() -> {
+            if (client.gameRenderer != null && client.player != null) {
+                // Send hotbar slot change packet directly
+                client.player.networkHandler.sendPacket(
+                    new net.minecraft.network.packet.c2s.play.UpdateSelectedSlotC2SPacket(
+                        TOTEM_HOTBAR_INDEX
+                    )
+                );
+            }
+        });
 
-        // Auto open, refill, auto close
         autoClose = true;
         startAt(0);
     }
@@ -111,8 +127,6 @@ public class AutoTotemModule {
 
             case 1 -> {
                 // Double pop: fill slot 9 first
-                // Slot 9 only pop: fill slot 9
-                // Offhand only pop / manual: skip
                 if (slot9Popped && !slot9Full) {
                     int slot = findTotem(player.getInventory(), TOTEM_HOTBAR_INDEX);
                     if (slot != -1) swapToHotbar(client, player, slot, TOTEM_HOTBAR_INDEX);
@@ -121,7 +135,7 @@ public class AutoTotemModule {
             }
 
             case 2 -> {
-                // Fill offhand if popped or if manual open and empty
+                // Fill offhand if needed
                 if (!offhandFull && (offhandPopped || (!offhandPopped && !slot9Popped))) {
                     int slot = findTotem(player.getInventory(), -1);
                     if (slot != -1) moveToOffhand(client, player, slot);
@@ -130,7 +144,7 @@ public class AutoTotemModule {
             }
 
             case 3 -> {
-                // Fill slot 9 if offhand-only pop or manual open and slot 9 empty
+                // Fill slot 9 if offhand-only pop or manual open
                 if (!slot9Full && !slot9Popped) {
                     int slot = findTotem(player.getInventory(), TOTEM_HOTBAR_INDEX);
                     if (slot != -1 && slot != TOTEM_HOTBAR_INDEX)
@@ -147,18 +161,6 @@ public class AutoTotemModule {
     }
 
     // ── Actions ───────────────────────────────────────────────────────────────
-
-    private void switchToSlot9(MinecraftClient client, ClientPlayerEntity player) {
-        client.execute(() -> {
-            client.interactionManager.clickSlot(
-                player.playerScreenHandler.syncId,
-                TOTEM_HOTBAR_INDEX + 36,
-                TOTEM_HOTBAR_INDEX,
-                SlotActionType.SWAP,
-                player
-            );
-        });
-    }
 
     private void moveToOffhand(MinecraftClient client, ClientPlayerEntity player, int invSlot) {
         int syncId     = player.playerScreenHandler.syncId;
