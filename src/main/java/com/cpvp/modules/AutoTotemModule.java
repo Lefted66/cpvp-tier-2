@@ -159,7 +159,13 @@ public class AutoTotemModule {
     /** Instantly switch hotbar selection to slot 9 — no inventory needed. */
     private void switchToSlot9(MinecraftClient client, ClientPlayerEntity player) {
         client.execute(() -> {
-            player.getInventory().select(TOTEM_HOTBAR_INDEX);
+            client.interactionManager.clickSlot(
+                player.playerScreenHandler.syncId,
+                TOTEM_HOTBAR_INDEX + 36,
+                TOTEM_HOTBAR_INDEX,
+                SlotActionType.SWAP,
+                player
+            );
         });
     }
 
