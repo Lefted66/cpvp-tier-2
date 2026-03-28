@@ -22,7 +22,7 @@ public class CpvpClient implements ClientModInitializer {
                 "key.cpvptier2.autototem",
                 InputUtil.Type.KEYSYM,
                 GLFW.GLFW_KEY_H,
-                "category.cpvptier2"
+                KeyBinding.MISC_CATEGORY
         ));
 
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
