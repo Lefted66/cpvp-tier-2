@@ -4,8 +4,10 @@ import com.cpvp.modules.AutoTotemModule;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.keybinding.v1.KeyBindingHelper;
+import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.option.KeyBinding;
 import net.minecraft.client.util.InputUtil;
+import net.minecraft.text.Text;
 import net.minecraft.util.Identifier;
 import org.lwjgl.glfw.GLFW;
 import org.slf4j.Logger;
@@ -30,11 +32,21 @@ public class CpvpClient implements ClientModInitializer {
         ));
 
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
-            while (toggleKey.wasPressed()) AUTO_TOTEM.toggle();
+            while (toggleKey.wasPressed()) {
+                LOGGER.info("[cPvP Tier 2] K pressed, toggling AutoTotem");
+                AUTO_TOTEM.toggle();
+                // Send as chat message too, not just action bar
+                if (client.player != null) {
+                    client.player.sendMessage(
+                        Text.literal("[cPvP] AutoTotem: "
+                            + (AUTO_TOTEM.isEnabled() ? "§aON" : "§cOFF"))
+                    );
+                }
+            }
             if (client.player == null || client.world == null) return;
             AUTO_TOTEM.onTick(client);
         });
 
-        LOGGER.info("[cPvP Tier 2] Loaded.");
+        LOGGER.info("[cPvP Tier 2] Loaded. Toggle key: K");
     }
 }
