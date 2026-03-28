@@ -4,6 +4,7 @@ import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.screen.ingame.InventoryScreen;
 import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.entity.player.PlayerInventory;
+import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
 import net.minecraft.screen.slot.SlotActionType;
 import net.minecraft.text.Text;
@@ -17,17 +18,20 @@ public class AutoTotemModule {
     private static final long JITTER_MAX_MS      = 20;
     private static final long MAX_TOTAL_MS       = 600;
 
-    private boolean enabled           = false;
-    private boolean running           = false;
-    private boolean doublePop         = false;
-    private boolean popQueued         = false;
+    private boolean enabled        = false;
+    private boolean running        = false;
+    private boolean doublePop      = false;
+    private boolean popQueued      = false;
 
-    private int  step                 = 0;
-    private long stepStartTime        = 0;
-    private long sequenceStartTime    = 0;
-    private long currentJitter        = 0;
+    private int  step              = 0;
+    private long stepStartTime     = 0;
+    private long sequenceStartTime = 0;
+    private long currentJitter     = 0;
 
-    private final Random random       = new Random();
+    // Offhand tracking for totem pop detection (no mixin needed)
+    private boolean prevOffhandWasTotem = false;
+
+    private final Random random = new Random();
 
     public boolean isEnabled() { return enabled; }
 
@@ -46,15 +50,27 @@ public class AutoTotemModule {
     public void onTick(MinecraftClient client) {
         if (!enabled || client.player == null) return;
 
+        // ── Totem pop detection via offhand polling ───────────────────────
+        // A totem pop = offhand HAD a totem last tick, now it doesn't,
+        // AND health is at or below 1 (the server sets it to 1 on pop).
+        ClientPlayerEntity player = client.player;
+        boolean offhandHasTotem = player.getOffHandStack().isOf(Items.TOTEM_OF_UNDYING);
+
+        if (prevOffhandWasTotem && !offhandHasTotem && player.getHealth() <= 1.0f) {
+            onTotemPop(client);
+        }
+        prevOffhandWasTotem = offhandHasTotem;
+
+        // ── Inventory open detection ──────────────────────────────────────
         boolean invOpen = isInventoryOpen(client);
 
         if (popQueued && invOpen && !running) {
             popQueued = false;
-            startSequence(client, false);
+            startSequence(false);
         }
 
         if (!running && invOpen) {
-            startSequence(client, false);
+            startSequence(false);
         }
 
         if (running) tickSequence(client);
@@ -72,14 +88,14 @@ public class AutoTotemModule {
         if (running) return;
 
         if (isInventoryOpen(client)) {
-            startSequence(client, false);
+            startSequence(false);
         } else {
             popQueued = true;
-            startSequence(client, true);
+            startSequence(true);
         }
     }
 
-    private void startSequence(MinecraftClient client, boolean needsOpen) {
+    private void startSequence(boolean needsOpen) {
         running = true;
         step    = needsOpen ? 0 : 1;
         long now = System.currentTimeMillis();
@@ -111,20 +127,14 @@ public class AutoTotemModule {
             }
 
             case 1 -> {
-                if (doublePop) {
-                    fillSlot9(client, player);
-                } else {
-                    fillOffhand(client, player);
-                }
+                if (doublePop) fillSlot9(client, player);
+                else           fillOffhand(client, player);
                 advance(now);
             }
 
             case 2 -> {
-                if (doublePop) {
-                    fillOffhand(client, player);
-                } else {
-                    fillSlot9(client, player);
-                }
+                if (doublePop) fillOffhand(client, player);
+                else           fillSlot9(client, player);
                 advance(now);
             }
 
@@ -143,8 +153,7 @@ public class AutoTotemModule {
     }
 
     private void fillSlot9(MinecraftClient client, ClientPlayerEntity player) {
-        if (player.getInventory().getStack(TOTEM_HOTBAR_INDEX)
-                  .isOf(Items.TOTEM_OF_UNDYING)) return;
+        if (player.getInventory().getStack(TOTEM_HOTBAR_INDEX).isOf(Items.TOTEM_OF_UNDYING)) return;
         int slot = findTotem(player.getInventory(), TOTEM_HOTBAR_INDEX);
         if (slot == -1 || slot == TOTEM_HOTBAR_INDEX) return;
         swapToHotbar(client, player, slot, TOTEM_HOTBAR_INDEX);
@@ -154,10 +163,8 @@ public class AutoTotemModule {
         int syncId     = player.playerScreenHandler.syncId;
         int screenFrom = toScreenSlot(invSlot);
         int offhand    = 45;
-
         client.interactionManager.clickSlot(syncId, screenFrom, 0, SlotActionType.PICKUP, player);
         client.interactionManager.clickSlot(syncId, offhand,    0, SlotActionType.PICKUP, player);
-
         if (!player.playerScreenHandler.getCursorStack().isEmpty()) {
             client.interactionManager.clickSlot(syncId, screenFrom, 0, SlotActionType.PICKUP, player);
         }
