@@ -12,8 +12,14 @@ import java.util.Random;
 public class AutoTotemModule {
 
     private static final int  TOTEM_HOTBAR_INDEX = 8;
-    private static final long TICK_MS            = 50;
-    private static final long JITTER_MS          = 10;
+
+    // ── Human-like timing ─────────────────────────────────────────────────────
+    private static final double MEAN_DELAY_MS   = 100.0;
+    private static final double STDDEV_DELAY_MS = 15.0;
+    private static final long   MIN_DELAY_MS    = 60;
+    private static final long   MAX_DELAY_MS    = 160;
+
+    private static final long POST_CLOSE_COOLDOWN_MS = 100;
 
     private boolean enabled             = false;
     private boolean running             = false;
@@ -24,12 +30,13 @@ public class AutoTotemModule {
     private boolean offhandPopped       = false;
     private boolean slot9Popped         = false;
 
-    // Cooldown to prevent false triggers
-    private long lastPopTime = 0;
+    private long lastPopTime   = 0;
+    private long lastCloseTime = 0;
     private static final long POP_COOLDOWN_MS = 1000;
 
     private int  step          = 0;
     private long stepStartTime = 0;
+    private long currentDelay  = 0;
 
     private final Random random = new Random();
 
@@ -51,8 +58,6 @@ public class AutoTotemModule {
         long now = System.currentTimeMillis();
 
         // ── Pop detection ─────────────────────────────────────────────────
-        // Detect purely from totem disappearing — no health check needed
-        // Cooldown prevents double-firing
         if (!running && (now - lastPopTime) > POP_COOLDOWN_MS) {
             boolean offhandJustPopped = prevOffhandWasTotem && !offhandHasTotem;
             boolean slot9JustPopped   = prevSlot9WasTotem   && !slot9HasTotem;
@@ -81,8 +86,7 @@ public class AutoTotemModule {
     }
 
     private void onPop(MinecraftClient client, ClientPlayerEntity player) {
-        // Double hand: set selectedSlot directly on client side only
-        // No packet sent — no anticheat flags
+        // Double hand: set slot 9 client-side instantly, no packet sent
         player.getInventory().selectedSlot = TOTEM_HOTBAR_INDEX;
 
         autoClose = true;
@@ -93,12 +97,12 @@ public class AutoTotemModule {
         running       = true;
         step          = startStep;
         stepStartTime = System.currentTimeMillis();
+        currentDelay  = nextDelay();
     }
 
     private void tickSequence(MinecraftClient client) {
-        long now   = System.currentTimeMillis();
-        long delay = TICK_MS + (long)(random.nextDouble() * JITTER_MS);
-        if (now - stepStartTime < delay) return;
+        long now = System.currentTimeMillis();
+        if (now - stepStartTime < currentDelay) return;
 
         ClientPlayerEntity player = client.player;
         if (player == null) { reset(); return; }
@@ -126,7 +130,7 @@ public class AutoTotemModule {
             }
 
             case 2 -> {
-                // Fill offhand if needed
+                // Fill offhand
                 if (!offhandFull && (offhandPopped || (!offhandPopped && !slot9Popped))) {
                     int slot = findTotem(player.getInventory(), -1);
                     if (slot != -1) moveToOffhand(client, player, slot);
@@ -135,7 +139,7 @@ public class AutoTotemModule {
             }
 
             case 3 -> {
-                // Fill slot 9 if offhand-only pop or manual open
+                // Fill slot 9 if offhand-only pop or manual
                 if (!slot9Full && !slot9Popped) {
                     int slot = findTotem(player.getInventory(), TOTEM_HOTBAR_INDEX);
                     if (slot != -1 && slot != TOTEM_HOTBAR_INDEX)
@@ -145,7 +149,10 @@ public class AutoTotemModule {
             }
 
             case 4 -> {
-                if (autoClose) closeInventory(client);
+                if (autoClose) {
+                    closeInventory(client);
+                    lastCloseTime = now;
+                }
                 reset();
             }
         }
@@ -173,6 +180,11 @@ public class AutoTotemModule {
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
+    private long nextDelay() {
+        double raw = MEAN_DELAY_MS + random.nextGaussian() * STDDEV_DELAY_MS;
+        return Math.max(MIN_DELAY_MS, Math.min(MAX_DELAY_MS, (long) raw));
+    }
+
     private int findTotem(PlayerInventory inv, int excludeSlot) {
         for (int i = 0; i < 36; i++) {
             if (i == excludeSlot) continue;
@@ -194,6 +206,7 @@ public class AutoTotemModule {
     private void advance(long now) {
         step++;
         stepStartTime = now;
+        currentDelay  = nextDelay();
     }
 
     private void reset() {
@@ -203,5 +216,6 @@ public class AutoTotemModule {
         slot9Popped   = false;
         step          = 0;
         stepStartTime = 0;
+        currentDelay  = 0;
     }
 }
