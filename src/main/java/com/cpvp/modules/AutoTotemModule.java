@@ -11,15 +11,12 @@ import java.util.Random;
 
 public class AutoTotemModule {
 
-    private static final int  TOTEM_HOTBAR_INDEX = 8;
-
-    // ── Human-like timing ─────────────────────────────────────────────────────
-    private static final double MEAN_DELAY_MS   = 100.0;
-    private static final double STDDEV_DELAY_MS = 15.0;
-    private static final long   MIN_DELAY_MS    = 60;
-    private static final long   MAX_DELAY_MS    = 160;
-
-    private static final long POST_CLOSE_COOLDOWN_MS = 100;
+    private static final int    TOTEM_HOTBAR_INDEX = 8;
+    private static final double MEAN_DELAY_MS      = 100.0;
+    private static final double STDDEV_DELAY_MS    = 15.0;
+    private static final long   MIN_DELAY_MS       = 60;
+    private static final long   MAX_DELAY_MS       = 160;
+    private static final long   POP_COOLDOWN_MS    = 1000;
 
     private boolean enabled             = false;
     private boolean running             = false;
@@ -32,8 +29,6 @@ public class AutoTotemModule {
 
     private long lastPopTime   = 0;
     private long lastCloseTime = 0;
-    private static final long POP_COOLDOWN_MS = 1000;
-
     private int  step          = 0;
     private long stepStartTime = 0;
     private long currentDelay  = 0;
@@ -47,6 +42,11 @@ public class AutoTotemModule {
         if (!enabled) reset();
     }
 
+    public void setEnabled(boolean val) {
+        enabled = val;
+        if (!enabled) reset();
+    }
+
     public void onTick(MinecraftClient client) {
         if (!enabled || client.player == null) return;
 
@@ -57,7 +57,7 @@ public class AutoTotemModule {
                                           .isOf(Items.TOTEM_OF_UNDYING);
         long now = System.currentTimeMillis();
 
-        // ── Pop detection ─────────────────────────────────────────────────
+        // Pop detection
         if (!running && (now - lastPopTime) > POP_COOLDOWN_MS) {
             boolean offhandJustPopped = prevOffhandWasTotem && !offhandHasTotem;
             boolean slot9JustPopped   = prevSlot9WasTotem   && !slot9HasTotem;
@@ -73,7 +73,7 @@ public class AutoTotemModule {
         prevOffhandWasTotem = offhandHasTotem;
         prevSlot9WasTotem   = slot9HasTotem;
 
-        // ── Manual inventory open ─────────────────────────────────────────
+        // Manual inventory open
         if (!prevInvOpen && invOpen && !running) {
             autoClose     = false;
             offhandPopped = false;
@@ -86,9 +86,8 @@ public class AutoTotemModule {
     }
 
     private void onPop(MinecraftClient client, ClientPlayerEntity player) {
-        // Double hand: set slot 9 client-side instantly, no packet sent
+        // Double hand: instantly switch to slot 9 client-side
         player.getInventory().selectedSlot = TOTEM_HOTBAR_INDEX;
-
         autoClose = true;
         startAt(0);
     }
@@ -114,7 +113,6 @@ public class AutoTotemModule {
         switch (step) {
 
             case 0 -> {
-                // Open inventory
                 client.execute(() ->
                     client.setScreen(new InventoryScreen(player)));
                 advance(now);
@@ -124,16 +122,16 @@ public class AutoTotemModule {
                 // Double pop: fill slot 9 first
                 if (slot9Popped && !slot9Full) {
                     int slot = findTotem(player.getInventory(), TOTEM_HOTBAR_INDEX);
-                    if (slot != -1) swapToHotbar(client, player, slot, TOTEM_HOTBAR_INDEX);
+                    if (slot != -1) guiSwapToHotbar(client, player, slot, TOTEM_HOTBAR_INDEX);
                 }
                 advance(now);
             }
 
             case 2 -> {
-                // Fill offhand
+                // Fill offhand instantly using gui_swap
                 if (!offhandFull && (offhandPopped || (!offhandPopped && !slot9Popped))) {
                     int slot = findTotem(player.getInventory(), -1);
-                    if (slot != -1) moveToOffhand(client, player, slot);
+                    if (slot != -1) guiSwapToOffhand(client, player, slot);
                 }
                 advance(now);
             }
@@ -143,7 +141,7 @@ public class AutoTotemModule {
                 if (!slot9Full && !slot9Popped) {
                     int slot = findTotem(player.getInventory(), TOTEM_HOTBAR_INDEX);
                     if (slot != -1 && slot != TOTEM_HOTBAR_INDEX)
-                        swapToHotbar(client, player, slot, TOTEM_HOTBAR_INDEX);
+                        guiSwapToHotbar(client, player, slot, TOTEM_HOTBAR_INDEX);
                 }
                 advance(now);
             }
@@ -158,20 +156,25 @@ public class AutoTotemModule {
         }
     }
 
-    // ── Actions ───────────────────────────────────────────────────────────────
+    // ── Instant GUI actions ───────────────────────────────────────────────────
 
-    private void moveToOffhand(MinecraftClient client, ClientPlayerEntity player, int invSlot) {
+    /**
+     * Instantly moves item to offhand using SWAP action with button 40
+     * (the offhand slot button index). This is a single packet — instant.
+     */
+    private void guiSwapToOffhand(MinecraftClient client, ClientPlayerEntity player, int invSlot) {
         int syncId     = player.playerScreenHandler.syncId;
         int screenFrom = toScreenSlot(invSlot);
-        client.interactionManager.clickSlot(syncId, screenFrom, 0, SlotActionType.PICKUP, player);
-        client.interactionManager.clickSlot(syncId, 45,        0, SlotActionType.PICKUP, player);
-        if (!player.playerScreenHandler.getCursorStack().isEmpty()) {
-            client.interactionManager.clickSlot(syncId, screenFrom, 0, SlotActionType.PICKUP, player);
-        }
+        // SWAP with button 40 = offhand slot
+        client.interactionManager.clickSlot(syncId, screenFrom, 40, SlotActionType.SWAP, player);
     }
 
-    private void swapToHotbar(MinecraftClient client, ClientPlayerEntity player,
-                               int fromInvSlot, int toHotbarIndex) {
+    /**
+     * Instantly moves item to hotbar slot using SWAP action.
+     * Single packet — instant.
+     */
+    private void guiSwapToHotbar(MinecraftClient client, ClientPlayerEntity player,
+                                  int fromInvSlot, int toHotbarIndex) {
         int syncId     = player.playerScreenHandler.syncId;
         int screenFrom = toScreenSlot(fromInvSlot);
         client.interactionManager.clickSlot(
