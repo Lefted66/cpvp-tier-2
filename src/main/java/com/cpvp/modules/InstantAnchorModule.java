@@ -13,11 +13,11 @@ import net.minecraft.util.math.BlockPos;
 import java.util.Random;
 
 /**
- * Instant Anchor — triggers on right click while looking at an uncharged anchor.
+ * Instant Anchor — triggers when a respawn anchor is placed.
  * Sequence:
  * 1. Switch to glowstone, charge anchor once
  * 2. Switch to totem
- * 3. Right click anchor to detonate
+ * 3. Detonate
  */
 public class InstantAnchorModule {
 
@@ -29,11 +29,12 @@ public class InstantAnchorModule {
     private int     step          = 0;
     private long    stepStartTime = 0;
 
-    // Remember the anchor position and hit result
-    private BlockHitResult savedHit = null;
+    private BlockPos       anchorPos = null;
+    private BlockHitResult anchorHit = null;
 
-    // Track right click to detect trigger
-    private boolean prevUsePressed = false;
+    // Track when anchor is placed
+    private boolean prevHoldingAnchor = false;
+    private boolean prevUsePressed    = false;
 
     private final Random random = new Random();
 
@@ -47,35 +48,36 @@ public class InstantAnchorModule {
     public void onTick(MinecraftClient client) {
         if (!enabled || client.player == null || client.world == null) return;
 
-        ClientPlayerEntity player = client.player;
-        boolean usePressed = client.options.useKey.isPressed();
+        ClientPlayerEntity player      = client.player;
+        boolean            holdingAnchor = player.getMainHandStack().isOf(Items.RESPAWN_ANCHOR);
+        boolean            usePressed    = client.options.useKey.isPressed();
 
-        // Trigger on right click press (not hold)
-        if (usePressed && !prevUsePressed && !running) {
-            // Check we're looking at an uncharged respawn anchor
+        // Detect: player just placed an anchor (was holding anchor + right clicked)
+        if (!running && holdingAnchor && usePressed && !prevUsePressed) {
             if (client.crosshairTarget instanceof BlockHitResult hit
                     && hit.getType() == HitResult.Type.BLOCK) {
-                BlockPos pos   = hit.getBlockPos();
-                var      state = client.world.getBlockState(pos);
-                if (state.isOf(Blocks.RESPAWN_ANCHOR)) {
-                    int charges = state.get(RespawnAnchorBlock.CHARGES);
-                    if (charges == 0) {
-                        savedHit = hit;
-                        startSequence();
-                    }
-                }
+                // The anchor will be placed on the face of the targeted block
+                BlockPos placedPos = hit.getBlockPos().offset(hit.getSide());
+
+                // Schedule a check next tick to confirm anchor was placed
+                anchorPos = placedPos;
+                anchorHit = new BlockHitResult(
+                    hit.getPos(),
+                    hit.getSide().getOpposite(),
+                    placedPos,
+                    false
+                );
+                // Start sequence on next tick so block exists in world
+                running       = true;
+                step          = -1; // wait one tick for block to exist
+                stepStartTime = System.currentTimeMillis();
             }
         }
 
-        prevUsePressed = usePressed;
+        prevHoldingAnchor = holdingAnchor;
+        prevUsePressed    = usePressed;
 
         if (running) tickSequence(client);
-    }
-
-    private void startSequence() {
-        running       = true;
-        step          = 0;
-        stepStartTime = System.currentTimeMillis();
     }
 
     private void tickSequence(MinecraftClient client) {
@@ -84,9 +86,26 @@ public class InstantAnchorModule {
         if (now - stepStartTime < delay) return;
 
         ClientPlayerEntity player = client.player;
-        if (player == null || savedHit == null) { reset(); return; }
+        if (player == null || anchorPos == null) { reset(); return; }
 
         switch (step) {
+
+            case -1 -> {
+                // Wait one tick, confirm anchor exists in world
+                if (client.world == null
+                        || !client.world.getBlockState(anchorPos).isOf(Blocks.RESPAWN_ANCHOR)) {
+                    reset();
+                    return;
+                }
+                // Build correct hit result now that block exists
+                anchorHit = new BlockHitResult(
+                    net.minecraft.util.math.Vec3d.ofCenter(anchorPos),
+                    net.minecraft.util.math.Direction.UP,
+                    anchorPos,
+                    false
+                );
+                advance(now);
+            }
 
             case 0 -> {
                 // Switch to glowstone
@@ -98,7 +117,7 @@ public class InstantAnchorModule {
 
             case 1 -> {
                 // Charge anchor once
-                client.interactionManager.interactBlock(player, Hand.MAIN_HAND, savedHit);
+                client.interactionManager.interactBlock(player, Hand.MAIN_HAND, anchorHit);
                 advance(now);
             }
 
@@ -112,7 +131,7 @@ public class InstantAnchorModule {
 
             case 3 -> {
                 // Detonate
-                client.interactionManager.interactBlock(player, Hand.MAIN_HAND, savedHit);
+                client.interactionManager.interactBlock(player, Hand.MAIN_HAND, anchorHit);
                 reset();
             }
         }
@@ -134,6 +153,7 @@ public class InstantAnchorModule {
         running       = false;
         step          = 0;
         stepStartTime = 0;
-        savedHit      = null;
+        anchorPos     = null;
+        anchorHit     = null;
     }
 }
