@@ -157,7 +157,8 @@ public class SafeAnchorModule {
      * This is the "front face" — the face closest to the player.
      */
     private Direction getFrontFace(ClientPlayerEntity player, BlockPos anchor) {
-        Vec3d diff = player.getPos().subtract(Vec3d.ofCenter(anchor));
+        Vec3d playerPos = new Vec3d(player.getX(), player.getY(), player.getZ());
+        Vec3d diff      = playerPos.subtract(Vec3d.ofCenter(anchor));
         // Pick the horizontal axis with the greatest difference
         if (Math.abs(diff.x) >= Math.abs(diff.z)) {
             return diff.x > 0 ? Direction.EAST : Direction.WEST;
