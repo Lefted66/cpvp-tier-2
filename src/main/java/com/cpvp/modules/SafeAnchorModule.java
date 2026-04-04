@@ -150,15 +150,25 @@ public class SafeAnchorModule {
      * Returns a horizontal direction that is to the SIDE of the player,
      * not in front or behind — so the explosion goes sideways.
      */
-    private Direction getSafeDirection(ClientPlayerEntity player) {
+     private Direction getSafeDirection(ClientPlayerEntity player) {
         float yaw = player.getYaw();
-        // Perpendicular to facing direction
-        Direction facing = Direction.fromRotation(yaw);
-        return switch (facing) {
-            case NORTH, SOUTH -> Direction.EAST;
-            default           -> Direction.NORTH;
-        };
-    }
+        // Normalize yaw to 0-360
+        yaw = ((yaw % 360) + 360) % 360;
+        // Get perpendicular horizontal direction
+        if (yaw < 45 || yaw >= 315) {
+            // Facing south → go east
+            return Direction.EAST;
+        } else if (yaw < 135) {
+            // Facing west → go north
+            return Direction.NORTH;
+        } else if (yaw < 225) {
+            // Facing north → go east
+            return Direction.EAST;
+        } else {
+            // Facing east → go north
+            return Direction.NORTH;
+        }
+     }
 
     private void lookAt(MinecraftClient client, ClientPlayerEntity player, Vec3d target) {
         Vec3d diff  = target.subtract(player.getEyePos());
