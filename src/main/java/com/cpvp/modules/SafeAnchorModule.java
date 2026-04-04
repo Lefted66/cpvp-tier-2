@@ -15,15 +15,12 @@ import net.minecraft.util.math.Vec3d;
 import java.util.Random;
 
 /**
- * Safe Anchor — triggered on V key press while looking at an uncharged anchor.
+ * Safe Anchor — triggered on V key press.
  * Sequence:
- * 1. Switch to glowstone
- * 2. Look at the SIDE of the anchor (not top) and charge it once
- * 3. Switch to totem
- * 4. Look back at anchor top face and detonate
- *
- * Placing glowstone on the side means the explosion shoots sideways,
- * not up toward the player — safe detonation.
+ * 1. Switch to respawn anchor, place it where looking
+ * 2. Switch to glowstone, place it on the FRONT face of the anchor
+ *    (the face facing toward player) — charges it safely
+ * 3. Switch to totem, look UP at anchor, detonate
  */
 public class SafeAnchorModule {
 
@@ -36,9 +33,9 @@ public class SafeAnchorModule {
     private int     step          = 0;
     private long    stepStartTime = 0;
 
-    private BlockPos        anchorPos   = null;
-    private BlockHitResult  anchorHit   = null;
-    private Direction       safeDir     = null;
+    private BlockPos       anchorPos    = null;
+    private BlockHitResult placeHit     = null;
+    private Direction      frontFace    = null; // face of anchor toward player
 
     private final Random random = new Random();
 
@@ -51,21 +48,17 @@ public class SafeAnchorModule {
 
     public void trigger(MinecraftClient client) {
         if (!enabled || running || client.player == null || client.world == null) return;
-
-        // Must be looking at an uncharged respawn anchor
         if (!(client.crosshairTarget instanceof BlockHitResult hit)) return;
         if (hit.getType() != HitResult.Type.BLOCK) return;
 
-        BlockPos pos   = hit.getBlockPos();
-        var      state = client.world.getBlockState(pos);
-        if (!state.isOf(Blocks.RESPAWN_ANCHOR)) return;
+        // The anchor will be placed on the face of the block we're looking at
+        BlockPos placed = hit.getBlockPos().offset(hit.getSide());
+        anchorPos = placed;
+        placeHit  = hit;
 
-        int charges = state.get(RespawnAnchorBlock.CHARGES);
-        if (charges != 0) return; // already charged
+        // Front face = face of anchor closest to player = direction from anchor to player
+        frontFace = getFrontFace(client.player, placed);
 
-        anchorPos = pos;
-        anchorHit = hit;
-        safeDir   = getSafeDirection(client.player);
         triggered = true;
     }
 
@@ -73,7 +66,7 @@ public class SafeAnchorModule {
         if (!enabled || client.player == null) return;
 
         if (triggered && !running) {
-            triggered = false;
+            triggered     = false;
             running       = true;
             step          = 0;
             stepStartTime = System.currentTimeMillis();
@@ -93,32 +86,49 @@ public class SafeAnchorModule {
         switch (step) {
 
             case 0 -> {
-                // Switch to glowstone
+                // Switch to respawn anchor
+                int anchorSlot = findInHotbar(player, Items.RESPAWN_ANCHOR);
+                if (anchorSlot == -1) { reset(); return; }
+                player.getInventory().selectedSlot = anchorSlot;
+                advance(now);
+            }
+
+            case 1 -> {
+                // Place the anchor
+                client.interactionManager.interactBlock(player, Hand.MAIN_HAND, placeHit);
+                advance(now);
+            }
+
+            case 2 -> {
+                // Confirm anchor placed, switch to glowstone
+                if (client.world == null
+                        || !client.world.getBlockState(anchorPos).isOf(Blocks.RESPAWN_ANCHOR)) {
+                    reset(); return;
+                }
                 int glowSlot = findInHotbar(player, Items.GLOWSTONE);
                 if (glowSlot == -1) { reset(); return; }
                 player.getInventory().selectedSlot = glowSlot;
                 advance(now);
             }
 
-            case 1 -> {
-                // Look at the SIDE face of the anchor and charge it
-                // The glowstone goes on the side, explosion goes sideways not up
-                Vec3d sideTarget = Vec3d.ofCenter(anchorPos)
-                        .add(Vec3d.of(safeDir.getVector()).multiply(0.5));
-                lookAt(player, sideTarget);
+            case 3 -> {
+                // Place glowstone on the FRONT face of the anchor
+                // Front face = face of the anchor that faces toward the player
+                // This charges the anchor safely — no need to look up/down
+                Vec3d frontCenter = Vec3d.ofCenter(anchorPos)
+                        .add(Vec3d.of(frontFace.getVector()).multiply(0.5));
 
-                // Build a hit result targeting the side face of the anchor
-                BlockHitResult sideHit = new BlockHitResult(
-                        sideTarget,
-                        safeDir,
+                BlockHitResult glowHit = new BlockHitResult(
+                        frontCenter,
+                        frontFace,
                         anchorPos,
                         false
                 );
-                client.interactionManager.interactBlock(player, Hand.MAIN_HAND, sideHit);
+                client.interactionManager.interactBlock(player, Hand.MAIN_HAND, glowHit);
                 advance(now);
             }
 
-            case 2 -> {
+            case 4 -> {
                 // Switch to totem
                 int totemSlot = findInHotbar(player, Items.TOTEM_OF_UNDYING);
                 if (totemSlot == -1) { reset(); return; }
@@ -126,44 +136,34 @@ public class SafeAnchorModule {
                 advance(now);
             }
 
-            case 3 -> {
-                // Look back at the top of the anchor and detonate
-                Vec3d topTarget = Vec3d.ofCenter(anchorPos).add(0, 0.5, 0);
-                lookAt(player, topTarget);
+            case 5 -> {
+                // Look up slightly and detonate anchor
+                player.setPitch(-30f); // look slightly up toward anchor
 
-                BlockHitResult topHit = new BlockHitResult(
-                        topTarget,
+                BlockHitResult detonateHit = new BlockHitResult(
+                        Vec3d.ofCenter(anchorPos).add(0, 0.5, 0),
                         Direction.UP,
                         anchorPos,
                         false
                 );
-                client.interactionManager.interactBlock(player, Hand.MAIN_HAND, topHit);
+                client.interactionManager.interactBlock(player, Hand.MAIN_HAND, detonateHit);
                 reset();
             }
         }
     }
 
     /**
-     * Returns a horizontal direction perpendicular to the player's facing,
-     * so the glowstone goes to the side, not toward or away from the player.
+     * Returns the direction from the anchor block toward the player.
+     * This is the "front face" — the face closest to the player.
      */
-    private Direction getSafeDirection(ClientPlayerEntity player) {
-        float yaw = ((player.getYaw() % 360) + 360) % 360;
-        // Return a direction perpendicular to player facing
-        if (yaw < 45 || yaw >= 315 || (yaw >= 135 && yaw < 225)) {
-            return Direction.EAST;
+    private Direction getFrontFace(ClientPlayerEntity player, BlockPos anchor) {
+        Vec3d diff = player.getPos().subtract(Vec3d.ofCenter(anchor));
+        // Pick the horizontal axis with the greatest difference
+        if (Math.abs(diff.x) >= Math.abs(diff.z)) {
+            return diff.x > 0 ? Direction.EAST : Direction.WEST;
         } else {
-            return Direction.NORTH;
+            return diff.z > 0 ? Direction.SOUTH : Direction.NORTH;
         }
-    }
-
-    private void lookAt(ClientPlayerEntity player, Vec3d target) {
-        Vec3d  diff  = target.subtract(player.getEyePos());
-        double dist  = diff.horizontalLength();
-        float  yaw   = (float)(Math.toDegrees(Math.atan2(-diff.x, diff.z)));
-        float  pitch = (float)(Math.toDegrees(-Math.atan2(diff.y, dist)));
-        player.setYaw(yaw);
-        player.setPitch(pitch);
     }
 
     private int findInHotbar(ClientPlayerEntity player, net.minecraft.item.Item item) {
@@ -184,7 +184,7 @@ public class SafeAnchorModule {
         step          = 0;
         stepStartTime = 0;
         anchorPos     = null;
-        anchorHit     = null;
-        safeDir       = null;
+        placeHit      = null;
+        frontFace     = null;
     }
 }
